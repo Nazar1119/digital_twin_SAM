@@ -1,1 +1,1 @@
-Repository of BC work Nazarii Tymochko
+# Repository of BC work Nazarii Tymochko

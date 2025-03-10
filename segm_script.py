@@ -8,7 +8,7 @@ import sys
 sys.path.append("..")
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 
-def filter_sinter_stones(masks, area_range=(100, 5000), min_aspect_ratio=0.5, min_iou_with_largest=0.3):
+def filter_sinter_stones(masks, area_range, min_aspect_ratio, min_iou_with_largest):
     filtered_masks = []
     if not masks:
         return filtered_masks
@@ -157,20 +157,34 @@ sam.to(device=device)
 mask_generator1_ = SamAutomaticMaskGenerator(
     model=sam,
     points_per_side=64,
-    pred_iou_thresh=0.6,
-    stability_score_thresh=0.6,
+    pred_iou_thresh=0.7,
+    stability_score_thresh=0.7,
     crop_n_layers=1,
     crop_n_points_downscale_factor=2,
-    min_mask_region_area=20,  # Increased from 1 to reduce small masks
+    min_mask_region_area=50,  # Increased from 1 to reduce small masks
 )
 
 image_original = cv2.imread('/home/nt646jh/directory/folder/bc_nazarii_tymochko/img1.jpg')
 image_original = cv2.cvtColor(image_original, cv2.COLOR_BGR2RGB)
 
+#Default filters:
+
 image = cv2.GaussianBlur(image_original, (5, 5), 0)
-clahe = cv2.createCLAHE(clipLimit=4, tileGridSize=(16, 16))
+clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
 image = np.stack([clahe.apply(image[:, :, i]) for i in range(3)], axis=2)
 image_resized = cv2.resize(image, (1024, 768))
+
+
+# Filter: Zhang et al. used image enhancement techniques to improve the quality of captured images, 
+# making edges and particle boundaries more distinguishable for subsequent edge detection. 
+# This likely involved adjusting contrast, brightness, or applying filters to reduce noise while preserving details.
+
+# image = cv2.cvtColor(image_original, cv2.COLOR_RGB2GRAY)  
+# clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))  
+# image = clahe.apply(image)
+# image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB) 
+# image = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)  
+# image_resized = cv2.resize(image, (1024, 768))
 
 masks_original = mask_generator1_.generate(image_resized)
 print(f"Number of masks generated: {len(masks_original)}")
@@ -184,18 +198,47 @@ filtered_masks = exclude_text_regions(masks_original, image_resized.shape, text_
 # sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 3500), min_aspect_ratio=0.7, min_iou_with_largest=0.5)
 # sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.5)
 
-sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(3, 3500), min_aspect_ratio=0.7, min_iou_with_largest=0.6)
-sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.5)
+sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 5000), min_aspect_ratio=0.8, min_iou_with_largest=0.7)
+sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.6)
 
 measure_box_dimensions(sinter_stone_masks)
 
 # Generate segmented image and add bounding boxes
-segmented_image = color_segmentation(sinter_stone_masks, image_resized)
-segmented_image_with_boxes = draw_bounding_boxes(segmented_image, sinter_stone_masks, color=(0, 255, 0), thickness=2)
 
-# Display and save results
-plt.figure(figsize=(50, 25))
-plt.imshow(segmented_image_with_boxes)
-plt.axis('off')
-plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/segmented_image_with_one_box_per_stone64_1.png')
+# # Display and save results
+# plt.figure(figsize=(50, 25))
+# plt.imshow(segmented_image_with_boxes)
+# plt.axis('off')
+# plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/64_filter1.png')
+# plt.close()
+
+
+# Extract bounding box dimensions and combine them into labels
+# Extract bounding box dimensions
+widths = [mask['bbox'][2] for mask in sinter_stone_masks]  # Widths in pixels
+heights = [mask['bbox'][3] for mask in sinter_stone_masks]  # Heights in pixels
+
+# Define bins for widths (e.g., 0-10, 10-20, ..., 100-110, etc.)
+bin_size = 10  # Adjust this based on your data
+max_width = max(widths)
+bins = np.arange(0, max_width + bin_size, bin_size)
+width_labels = [f"{int(b)}-{int(b + bin_size)}" for b in bins[:-1]]
+
+# Bin the widths
+binned_widths = np.digitize(widths, bins, right=True)
+binned_counts = np.bincount(binned_widths)[1:]  # Ignore the 0th bin (below the first bin)
+
+# Create histogram
+plt.figure(figsize=(12, 6))
+plt.bar(width_labels, binned_counts, color='purple', alpha=0.7, edgecolor='black')
+plt.title('Histogram of Bounding Box Widths (Binned)')
+plt.xlabel('Width Range (pixels)')
+plt.ylabel('Frequency')
+
+# Rotate x-axis labels for readability
+plt.xticks(rotation=45, ha='right')
+
+# Adjust layout and save histogram
+plt.tight_layout()
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/64_filter1_histogram_binned_width.png')
 plt.close()

@@ -119,32 +119,42 @@ def color_segmentation(masks, base_image):
     
     return segmented_image
 
-def draw_bounding_boxes(image, masks, color=(0, 255, 0), thickness=1):
+
+
+def get_rotated_min_bounding_rect(mask):
+    binary_mask = mask['segmentation'].astype(np.uint8)
+    contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    largest_contour = max(contours, key=cv2.contourArea)
+    min_rect = cv2.minAreaRect(largest_contour)
+    width, height = min_rect[1]
+    
+    if width < height:
+        width, height = height, width
+    
+    perimeter = 2 * width + 2 * height
+    box_points = cv2.boxPoints(min_rect)
+    box_points = box_points.astype(np.int32)
+    
+    return perimeter, box_points
+
+
+def draw_bounding_boxes(image, box_points_list, color=(0, 255, 0), thickness=1):
     result_image = image.copy()
-    processed_bboxes = set()
-    
-    for mask in masks:
-        bbox = mask['bbox']
-        bbox_tuple = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
-        if bbox_tuple not in processed_bboxes:
-            x_min, y_min, w, h = bbox_tuple
-            cv2.rectangle(result_image, (x_min, y_min), (x_min + w, y_min + h), color, thickness)
-            processed_bboxes.add(bbox_tuple)
-    
+    for box_points in box_points_list:
+        cv2.polylines(result_image, [box_points], isClosed=True, color=color, thickness=thickness)
     return result_image
 
 def measure_box_dimensions(masks):
     print("\nBounding Box Dimensions (width, height) in pixels:")
     for i, mask in enumerate(masks, 1):
         bbox = mask['bbox']
-        width = bbox[2]  # Width in pixels
-        height = bbox[3]  # Height in pixels
+        width = bbox[2]  
+        height = bbox[3]  
         print(f"Box {i}: Width = {width} pixels, Height = {height} pixels")
 
 image = cv2.imread('/home/nt646jh/directory/folder/bc_nazarii_tymochko/img1.jpg')
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-# SAM setup
 sam_checkpoint = '/home/nt646jh/directory/folder/bc_nazarii_tymochko/SegmentAnything/sam_vit_h_4b8939.pth'
 model_type = "vit_h"
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -153,38 +163,37 @@ print(f"Using device: {device}")
 sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
 sam.to(device=device)
 
-# Mask generation with adjusted parameters (keeping your specified values but increasing min_mask_region_area)
 mask_generator1_ = SamAutomaticMaskGenerator(
     model=sam,
-    points_per_side=64,
-    pred_iou_thresh=0.7,
-    stability_score_thresh=0.7,
+    points_per_side=32,
+    pred_iou_thresh=0.6,
+    stability_score_thresh=0.6,
     crop_n_layers=1,
     crop_n_points_downscale_factor=2,
-    min_mask_region_area=50,  # Increased from 1 to reduce small masks
+    min_mask_region_area=20,  
 )
 
 image_original = cv2.imread('/home/nt646jh/directory/folder/bc_nazarii_tymochko/img1.jpg')
 image_original = cv2.cvtColor(image_original, cv2.COLOR_BGR2RGB)
 
-#Default filters:
+####### Default filters:
 
-image = cv2.GaussianBlur(image_original, (5, 5), 0)
-clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
-image = np.stack([clahe.apply(image[:, :, i]) for i in range(3)], axis=2)
-image_resized = cv2.resize(image, (1024, 768))
+# image = cv2.GaussianBlur(image_original, (5, 5), 0)
+# clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
+# image = np.stack([clahe.apply(image[:, :, i]) for i in range(3)], axis=2)
+# image_resized = cv2.resize(image, (1024, 768))
 
 
-# Filter: Zhang et al. used image enhancement techniques to improve the quality of captured images, 
+####### Filter: Zhang et al. used image enhancement techniques to improve the quality of captured images, 
 # making edges and particle boundaries more distinguishable for subsequent edge detection. 
 # This likely involved adjusting contrast, brightness, or applying filters to reduce noise while preserving details.
 
-# image = cv2.cvtColor(image_original, cv2.COLOR_RGB2GRAY)  
-# clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))  
-# image = clahe.apply(image)
-# image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB) 
-# image = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)  
-# image_resized = cv2.resize(image, (1024, 768))
+image = cv2.cvtColor(image_original, cv2.COLOR_RGB2GRAY)  
+clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))  
+image = clahe.apply(image)
+image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB) 
+image = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)  
+image_resized = cv2.resize(image, (1024, 768))
 
 masks_original = mask_generator1_.generate(image_resized)
 print(f"Number of masks generated: {len(masks_original)}")
@@ -194,51 +203,49 @@ text_regions = [
     (image_resized.shape[1] - 63 - 208, image_resized.shape[0] - 72 - (27 // 2), 208, 25)  # Bottom-right text (exact size and position)
 ]
 
+
+
 filtered_masks = exclude_text_regions(masks_original, image_resized.shape, text_regions)
 # sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 3500), min_aspect_ratio=0.7, min_iou_with_largest=0.5)
 # sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.5)
 
-sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 5000), min_aspect_ratio=0.8, min_iou_with_largest=0.7)
-sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.6)
+sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 4000), min_aspect_ratio=0.5, min_iou_with_largest=0.5)
+sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.5)
 
-measure_box_dimensions(sinter_stone_masks)
+perimeters = []
+box_points_list = [] 
+for mask in sinter_stone_masks:
+    result = get_rotated_min_bounding_rect(mask)
+    if result is None:
+        continue
+    perimeter, box_points = result
+    perimeters.append(perimeter)
+    box_points_list.append(box_points)
 
-# Generate segmented image and add bounding boxes
+print("\nPerimeters of Rotated Minimum Bounding Boxes (in pixels):")
+for i, perimeter in enumerate(perimeters, 1):
+    print(f"Box {i}: Perimeter = {perimeter:.2f} pixels")
 
-# # Display and save results
-# plt.figure(figsize=(50, 25))
-# plt.imshow(segmented_image_with_boxes)
-# plt.axis('off')
-# plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/64_filter1.png')
-# plt.close()
+segmented_image = color_segmentation(sinter_stone_masks, image_resized)
+segmented_image_with_boxes = draw_bounding_boxes(segmented_image, box_points_list, color=(0, 255, 0), thickness=1)
+
+plt.figure(figsize=(50, 25))
+plt.imshow(segmented_image_with_boxes)
+plt.axis('off')
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/32_minimum_bounding_box_rectangle_2.png')
+plt.close()
 
 
-# Extract bounding box dimensions and combine them into labels
-# Extract bounding box dimensions
-widths = [mask['bbox'][2] for mask in sinter_stone_masks]  # Widths in pixels
-heights = [mask['bbox'][3] for mask in sinter_stone_masks]  # Heights in pixels
+counts, bin_edges = np.histogram(perimeters, bins=40)
 
-# Define bins for widths (e.g., 0-10, 10-20, ..., 100-110, etc.)
-bin_size = 10  # Adjust this based on your data
-max_width = max(widths)
-bins = np.arange(0, max_width + bin_size, bin_size)
-width_labels = [f"{int(b)}-{int(b + bin_size)}" for b in bins[:-1]]
-
-# Bin the widths
-binned_widths = np.digitize(widths, bins, right=True)
-binned_counts = np.bincount(binned_widths)[1:]  # Ignore the 0th bin (below the first bin)
-
-# Create histogram
 plt.figure(figsize=(12, 6))
-plt.bar(width_labels, binned_counts, color='purple', alpha=0.7, edgecolor='black')
-plt.title('Histogram of Bounding Box Widths (Binned)')
-plt.xlabel('Width Range (pixels)')
+plt.hist(perimeters, bins=40, color='purple', alpha=0.8, edgecolor='black')
+plt.title('Histogram of Bounding Box Perimeters (2 * Width + 2 * Height)')
+plt.xlabel('Perimeter (pixels)')
 plt.ylabel('Frequency')
 
-# Rotate x-axis labels for readability
-plt.xticks(rotation=45, ha='right')
+plt.xticks(bin_edges, rotation=90, ha='right')
 
-# Adjust layout and save histogram
 plt.tight_layout()
-plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/64_filter1_histogram_binned_width.png')
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/32_filter1_histogram_perimeter.png')
 plt.close()

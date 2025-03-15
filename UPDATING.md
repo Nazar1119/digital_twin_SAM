@@ -1,1 +1,12 @@
-# Updating 15.03 new experiment with SAM parameters, chainging a histogram logic, adding a calculating of circumference diameter of single agglomerate based on minimum bounding rectangle, then showing every diameter at histogram.
+# Updating 15.03
+
+## Overview
+This update introduces new experimental changes to the project, focusing on adjustments to the SAM parameters and improvements in histogram logic. Additionally, a new calculation for the circumference diameter of a single agglomerate is implemented.
+
+## Changes & Improvements
+- **Experimenting with SAM parameters** to refine processing accuracy.
+- **Modified histogram logic** to enhance data representation.
+- **Implemented circumference diameter calculation**:
+  - Uses the **Minimum Bounding Rectangle (MBR)** method.
+  - Determines the **diameter of a single agglomerate**.
+  - Displays each calculated diameter in the histogram.

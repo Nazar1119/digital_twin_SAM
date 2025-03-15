@@ -132,10 +132,11 @@ def get_rotated_min_bounding_rect(mask):
         width, height = height, width
     
     perimeter = 2 * width + 2 * height
+    circumference_diametr = perimeter / np.pi
     box_points = cv2.boxPoints(min_rect)
     box_points = box_points.astype(np.int32)
     
-    return perimeter, box_points
+    return circumference_diametr, box_points
 
 
 def draw_bounding_boxes(image, box_points_list, color=(0, 255, 0), thickness=1):
@@ -150,7 +151,6 @@ def measure_box_dimensions(masks):
         bbox = mask['bbox']
         width = bbox[2]  
         height = bbox[3]  
-        print(f"Box {i}: Width = {width} pixels, Height = {height} pixels")
 
 image = cv2.imread('/home/nt646jh/directory/folder/bc_nazarii_tymochko/img1.jpg')
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -165,12 +165,12 @@ sam.to(device=device)
 
 mask_generator1_ = SamAutomaticMaskGenerator(
     model=sam,
-    points_per_side=32,
-    pred_iou_thresh=0.6,
-    stability_score_thresh=0.6,
+    points_per_side=256,
+    pred_iou_thresh=0.8,
+    stability_score_thresh=0.8,
     crop_n_layers=1,
     crop_n_points_downscale_factor=2,
-    min_mask_region_area=20,  
+    min_mask_region_area=100,  
 )
 
 image_original = cv2.imread('/home/nt646jh/directory/folder/bc_nazarii_tymochko/img1.jpg')
@@ -189,11 +189,13 @@ image_original = cv2.cvtColor(image_original, cv2.COLOR_BGR2RGB)
 # This likely involved adjusting contrast, brightness, or applying filters to reduce noise while preserving details.
 
 image = cv2.cvtColor(image_original, cv2.COLOR_RGB2GRAY)  
-clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))  
+clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(16, 16))  
 image = clahe.apply(image)
 image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB) 
 image = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)  
 image_resized = cv2.resize(image, (1024, 768))
+
+
 
 masks_original = mask_generator1_.generate(image_resized)
 print(f"Number of masks generated: {len(masks_original)}")
@@ -209,21 +211,21 @@ filtered_masks = exclude_text_regions(masks_original, image_resized.shape, text_
 # sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 3500), min_aspect_ratio=0.7, min_iou_with_largest=0.5)
 # sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.5)
 
-sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 4000), min_aspect_ratio=0.5, min_iou_with_largest=0.5)
-sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.5)
+sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 3500), min_aspect_ratio=0.8, min_iou_with_largest=0.8)
+sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.9)
 
-perimeters = []
+circumference_diameters = []
 box_points_list = [] 
 for mask in sinter_stone_masks:
     result = get_rotated_min_bounding_rect(mask)
     if result is None:
         continue
-    perimeter, box_points = result
-    perimeters.append(perimeter)
+    circumference_diametr, box_points = result
+    circumference_diameters.append(circumference_diametr)
     box_points_list.append(box_points)
 
 print("\nPerimeters of Rotated Minimum Bounding Boxes (in pixels):")
-for i, perimeter in enumerate(perimeters, 1):
+for i, perimeter in enumerate(circumference_diameters, 1):
     print(f"Box {i}: Perimeter = {perimeter:.2f} pixels")
 
 segmented_image = color_segmentation(sinter_stone_masks, image_resized)
@@ -232,20 +234,20 @@ segmented_image_with_boxes = draw_bounding_boxes(segmented_image, box_points_lis
 plt.figure(figsize=(50, 25))
 plt.imshow(segmented_image_with_boxes)
 plt.axis('off')
-plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/32_minimum_bounding_box_rectangle_2.png')
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/256_minimum_bounding_box_rectangle2.png')
 plt.close()
 
 
-counts, bin_edges = np.histogram(perimeters, bins=40)
+counts, bin_edges = np.histogram(circumference_diameters, bins=40)
 
 plt.figure(figsize=(12, 6))
-plt.hist(perimeters, bins=40, color='purple', alpha=0.8, edgecolor='black')
-plt.title('Histogram of Bounding Box Perimeters (2 * Width + 2 * Height)')
+plt.hist(circumference_diameters, bins=40, color='purple', alpha=0.8, edgecolor='black')
+plt.title('Histogram of Bounding Box Circumference diameter (2 * Width + 2 * Height)')
 plt.xlabel('Perimeter (pixels)')
 plt.ylabel('Frequency')
 
 plt.xticks(bin_edges, rotation=90, ha='right')
 
 plt.tight_layout()
-plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/32_filter1_histogram_perimeter.png')
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/256_filter_histogram_perimeter2.png')
 plt.close()

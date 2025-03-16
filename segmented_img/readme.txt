@@ -1,4 +1,4 @@
-x_y_z_r_e
+folder name - x_y_z_r_e
 x - pred_iou_thresh(sets the minimum predicted IoU (Intersection over Union) that a mask must have to be considered valid)
 y - stability_score_thresh(this threshold filters masks based on their stability score, which measures consistency across different IoU thresholds)
 z - min_aspect_ratio(parameter filters masks based on their aspect ratio (minimum of width/height or height/width))

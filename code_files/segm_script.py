@@ -124,6 +124,8 @@ def color_segmentation(masks, base_image):
 def get_rotated_min_bounding_rect(mask):
     binary_mask = mask['segmentation'].astype(np.uint8)
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
     largest_contour = max(contours, key=cv2.contourArea)
     min_rect = cv2.minAreaRect(largest_contour)
     width, height = min_rect[1]
@@ -132,12 +134,43 @@ def get_rotated_min_bounding_rect(mask):
         width, height = height, width
     
     perimeter = 2 * width + 2 * height
-    circumference_diametr = perimeter / np.pi
+    
+    circumference_diameter = perimeter / np.pi
+    
     box_points = cv2.boxPoints(min_rect)
     box_points = box_points.astype(np.int32)
     
-    return circumference_diametr, box_points
 
+    moments = cv2.moments(largest_contour)
+    if moments['m00'] == 0: 
+        return None
+    
+
+    cx = moments['m10'] / moments['m00']
+    cy = moments['m01'] / moments['m00']
+    
+
+    mu20 = moments['mu20'] / moments['m00']  
+    mu02 = moments['mu02'] / moments['m00']  
+    mu11 = moments['mu11'] / moments['m00']  
+    
+    
+    a = mu20 + mu02
+    b = np.sqrt(4 * mu11**2 + (mu20 - mu02)**2)
+    lambda1 = (a + b) / 2  
+    lambda2 = (a - b) / 2 
+    
+    major_axis = 4 * np.sqrt(lambda1)
+    minor_axis = 4 * np.sqrt(lambda2)
+    
+    if mu11 == 0 and mu20 == mu02:
+        orientation = 0
+    else:
+        orientation = 0.5 * np.arctan2(2 * mu11, mu20 - mu02) * 180 / np.pi
+
+    area = np.pi * (major_axis / 2) * (minor_axis / 2)
+    
+    return area, perimeter, circumference_diameter, major_axis, minor_axis, orientation, box_points
 
 def draw_bounding_boxes(image, box_points_list, color=(0, 255, 0), thickness=1):
     result_image = image.copy()
@@ -152,6 +185,7 @@ def measure_box_dimensions(masks):
         width = bbox[2]  
         height = bbox[3]  
 
+ 
 image = cv2.imread('/home/nt646jh/directory/folder/bc_nazarii_tymochko/img1.jpg')
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
@@ -165,9 +199,9 @@ sam.to(device=device)
 
 mask_generator1_ = SamAutomaticMaskGenerator(
     model=sam,
-    points_per_side=256,
-    pred_iou_thresh=0.8,
-    stability_score_thresh=0.8,
+    points_per_side=128,
+    pred_iou_thresh=0.7,
+    stability_score_thresh=0.7,
     crop_n_layers=1,
     crop_n_points_downscale_factor=2,
     min_mask_region_area=100,  
@@ -211,22 +245,34 @@ filtered_masks = exclude_text_regions(masks_original, image_resized.shape, text_
 # sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 3500), min_aspect_ratio=0.7, min_iou_with_largest=0.5)
 # sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.5)
 
-sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 3500), min_aspect_ratio=0.8, min_iou_with_largest=0.8)
-sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.9)
+sinter_stone_masks = filter_sinter_stones(filtered_masks, area_range=(10, 3500), min_aspect_ratio=0.7, min_iou_with_largest=0.7)
+sinter_stone_masks = merge_overlapping_masks(sinter_stone_masks, iou_threshold=0.3)
 
 circumference_diameters = []
-box_points_list = [] 
+major_axes = []
+minor_axes = []
+areas = []
+orientations = []
+perimeters = []
+box_points_list = []
 for mask in sinter_stone_masks:
     result = get_rotated_min_bounding_rect(mask)
     if result is None:
         continue
-    circumference_diametr, box_points = result
-    circumference_diameters.append(circumference_diametr)
+    area, perimeter, circumference_diameter, major_axis, minor_axis, orientation, box_points = result
+    circumference_diameters.append(circumference_diameter)
+    major_axes.append(major_axis)
+    areas.append(area)
+    minor_axes.append(minor_axis)
+    orientations.append(orientation)
+    perimeters.append(perimeter)
     box_points_list.append(box_points)
 
-print("\nPerimeters of Rotated Minimum Bounding Boxes (in pixels):")
-for i, perimeter in enumerate(circumference_diameters, 1):
-    print(f"Box {i}: Perimeter = {perimeter:.2f} pixels")
+# Print all metrics
+print("\nPerimeters, Circumference Diameters, and Legendre Ellipse Properties of Rotated Minimum Bounding Boxes (in pixels):")
+for i, (are, perim, diam, major, minor, orient) in enumerate(zip(areas, perimeters, circumference_diameters, major_axes, minor_axes, orientations), 1):
+    print(f"Box {i}: Perimeter = {perim:.2f} pixels, Circumference Diameter = {diam:.2f} pixels, Major Axis = {major:.2f} pixels, Minor Axis = {minor:.2f} pixels, Orientation = {orient:.2f} degrees, Legendre area = {are:.2f}")
+
 
 segmented_image = color_segmentation(sinter_stone_masks, image_resized)
 segmented_image_with_boxes = draw_bounding_boxes(segmented_image, box_points_list, color=(0, 255, 0), thickness=1)
@@ -234,20 +280,66 @@ segmented_image_with_boxes = draw_bounding_boxes(segmented_image, box_points_lis
 plt.figure(figsize=(50, 25))
 plt.imshow(segmented_image_with_boxes)
 plt.axis('off')
-plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/256_minimum_bounding_box_rectangle2.png')
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/128_MBR.png')
 plt.close()
+
 
 
 counts, bin_edges = np.histogram(circumference_diameters, bins=40)
-
 plt.figure(figsize=(12, 6))
 plt.hist(circumference_diameters, bins=40, color='purple', alpha=0.8, edgecolor='black')
-plt.title('Histogram of Bounding Box Circumference diameter (2 * Width + 2 * Height)')
-plt.xlabel('Perimeter (pixels)')
+plt.title('Histogram of MBR Circumference Diameter')
+plt.xlabel('Circumference Diameter (pixels)')
 plt.ylabel('Frequency')
-
 plt.xticks(bin_edges, rotation=90, ha='right')
-
 plt.tight_layout()
-plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/256_filter_histogram_perimeter2.png')
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/128_histogram_circumference_diameter.png')
 plt.close()
+
+# Histogram for Area of Legendre Ellipse
+counts, bin_edges = np.histogram(areas, bins=40)
+plt.figure(figsize=(12, 6))
+plt.hist(areas, bins=40, color='blue', alpha=0.8, edgecolor='black')
+plt.title('Histogram of Legendre Ellipse Major Axis')
+plt.xlabel('Major Axis (pixels)')
+plt.ylabel('Frequency')
+plt.xticks(bin_edges, rotation=90, ha='right')
+plt.tight_layout()
+plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/128_histogram_area.png')
+plt.close()
+
+# Histogram for Major Axis of Legendre Ellipse
+# counts, bin_edges = np.histogram(major_axes, bins=40)
+# plt.figure(figsize=(12, 6))
+# plt.hist(major_axes, bins=40, color='blue', alpha=0.8, edgecolor='black')
+# plt.title('Histogram of Legendre Ellipse Major Axis')
+# plt.xlabel('Major Axis (pixels)')
+# plt.ylabel('Frequency')
+# plt.xticks(bin_edges, rotation=90, ha='right')
+# plt.tight_layout()
+# plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/128_histogram_major_axis.png')
+# plt.close()
+
+# # Histogram for Minor Axis of Legendre Ellipse
+# counts, bin_edges = np.histogram(minor_axes, bins=40)
+# plt.figure(figsize=(12, 6))
+# plt.hist(minor_axes, bins=40, color='green', alpha=0.8, edgecolor='black')
+# plt.title('Histogram of Legendre Ellipse Minor Axis')
+# plt.xlabel('Minor Axis (pixels)')
+# plt.ylabel('Frequency')
+# plt.xticks(bin_edges, rotation=90, ha='right')
+# plt.tight_layout()
+# plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/128_histogram_minor_axis.png')
+# plt.close()
+
+# # Histogram for Orientation of Legendre Ellipse
+# counts, bin_edges = np.histogram(orientations, bins=40)
+# plt.figure(figsize=(12, 6))
+# plt.hist(orientations, bins=40, color='orange', alpha=0.8, edgecolor='black')
+# plt.title('Histogram of Legendre Ellipse Orientation')
+# plt.xlabel('Orientation (degrees)')
+# plt.ylabel('Frequency')
+# plt.xticks(bin_edges, rotation=90, ha='right')
+# plt.tight_layout()
+# plt.savefig('/home/nt646jh/directory/folder/bc_nazarii_tymochko/128_histogram_orientation.png')
+# plt.close()
